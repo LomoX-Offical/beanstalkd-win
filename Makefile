@@ -87,6 +87,13 @@ $(TOFILES): $(HFILES) ct/ct.h
 
 CLEANFILES:=$(CLEANFILES) ct/_* ct/*.o
 
+ifneq ($(shell ./verc.sh),$(shell cat vers.c 2>/dev/null))
+.PHONY: vers.c
+endif
+
+vers.c:
+	./verc.sh >vers.c
+
 doc/beanstalkd.1 doc/beanstalkd.1.html: doc/beanstalkd.ronn
 	ronn $<
 
