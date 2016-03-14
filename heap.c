@@ -95,6 +95,10 @@ heapinsert(Heap *h, void *x)
     k = h->len;
     h->len++;
     set(h, k, x);
+    if (k == h->len) {
+        k--;
+    }
+
     siftdown(h, k);
     return 1;
 }
@@ -112,6 +116,13 @@ heapremove(Heap *h, int k)
     x = h->data[k];
     h->len--;
     set(h, k, h->data[h->len]);
+
+    // fix the bug
+    if (k == h->len && h->len != 0) {
+        k--;
+    }
+
+
     siftdown(h, k);
     siftup(h, k);
     h->rec(x, -1);

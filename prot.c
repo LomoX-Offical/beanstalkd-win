@@ -431,7 +431,7 @@ process_queue()
     int64 now = nanoseconds();
 
     while ((j = next_eligible_job(now))) {
-        heapremove(&j->tube->ready, j->heap_index);
+        heapremove(&j->tube->ready, j->heap_index, 0);
         ready_ct--;
         if (j->r.pri < URGENT_THRESHOLD) {
             global_stat.urgent_ct--;
@@ -468,11 +468,11 @@ enqueue_job(Server *s, job j, int64 delay, char update_store)
     j->reserver = NULL;
     if (delay) {
         j->r.deadline_at = nanoseconds() + delay;
-        r = heapinsert(&j->tube->delay, j);
+        r = heapinsert(&j->tube->delay, j, 0);
         if (!r) return 0;
         j->r.state = Delayed;
     } else {
-        r = heapinsert(&j->tube->ready, j);
+        r = heapinsert(&j->tube->ready, j, 0);
         if (!r) return 0;
         j->r.state = Ready;
         ready_ct++;
@@ -544,7 +544,7 @@ delay_q_take()
     if (!j) {
         return 0;
     }
-    heapremove(&j->tube->delay, j->heap_index);
+    heapremove(&j->tube->delay, j->heap_index, 0);
     return j;
 }
 
@@ -593,7 +593,7 @@ kick_delayed_job(Server *s, job j)
     if (!z) return 0;
     j->walresv += z;
 
-    heapremove(&j->tube->delay, j->heap_index);
+    heapremove(&j->tube->delay, j->heap_index, 0);
 
     j->r.kick_ct++;
     r = enqueue_job(s, j, 0, 1);
@@ -653,7 +653,7 @@ static job
 remove_delayed_job(job j)
 {
     if (!j || j->r.state != Delayed) return NULL;
-    heapremove(&j->tube->delay, j->heap_index);
+    heapremove(&j->tube->delay, j->heap_index, 0);
 
     return j;
 }
@@ -662,7 +662,7 @@ static job
 remove_ready_job(job j)
 {
     if (!j || j->r.state != Ready) return NULL;
-    heapremove(&j->tube->ready, j->heap_index);
+    heapremove(&j->tube->ready, j->heap_index, 0);
     ready_ct--;
     if (j->r.pri < URGENT_THRESHOLD) {
         global_stat.urgent_ct--;
@@ -1968,7 +1968,7 @@ prottick(Server *s)
             break;
         }
 
-        heapremove(&s->conns, 0);
+        heapremove(&s->conns, 0, 1);
         conn_timeout(c);
     }
 

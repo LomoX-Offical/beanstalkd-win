@@ -93,7 +93,8 @@ enum {
     SOCK_TYPE_CONNECT
 };
 
-#define ACCEPT_LENGTH (sizeof(SOCKADDR) + 16)
+#define SOCKADDR_LENGTH (512)
+#define ACCEPT_LENGTH   (SOCKADDR_LENGTH + 16)
 
 typedef struct {
     WSAOVERLAPPED    ovlp;

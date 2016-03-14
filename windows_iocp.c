@@ -191,8 +191,8 @@ sockaccept(int fd, struct sockaddr *addr, int *addrlen)
     GetAcceptExSockaddrs(
         acpt->buf,
         0,
-        sizeof(SOCKADDR),
-        sizeof(SOCKADDR),
+        ACCEPT_LENGTH,
+        ACCEPT_LENGTH,
         &plocalsa, &locallen,
         &premotesa, &remotelen);
 
@@ -203,10 +203,13 @@ sockaccept(int fd, struct sockaddr *addr, int *addrlen)
                 *addrlen = remotelen;
             }
             memcpy(addr, premotesa, *addrlen);
+            WRITE_LOG("[sockaccept] fd:%d, remote port:%d\n", acceptfd, ntohs(((struct sockaddr_in*)addr)->sin_port));
         } else {
             *addrlen = 0;
+            WRITE_LOG("[sockaccept] fd:%d, no remote info..\n", acceptfd);
         }
     }
+  
 
     /* queue another accept */
     if (sockqueueaccept(s, ovlp) == -1) {
@@ -225,14 +228,11 @@ sockqueueaccept(Socket *s, void* ovlp_ptr)
 
     acpt = (iocp_accept_t*)ovlp->data;
 
-
     acpt->fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (acpt->fd == -1) {
         errno = WSAEINVAL;
         return -1;
     }
-     
-    
 
     if(!AcceptEx(s->fd, acpt->fd, acpt->buf, 0, 
         ACCEPT_LENGTH, ACCEPT_LENGTH, 0, (LPOVERLAPPED)ovlp))
@@ -243,7 +243,10 @@ sockqueueaccept(Socket *s, void* ovlp_ptr)
         }else{
             result = -1;
         }
+    } else {
+        WRITE_LOG("[sockqueueaccept] fd:%d, AcceptEx success!\n", acpt->fd);
     }
+
     return result;
 }
 
@@ -252,11 +255,13 @@ sockwant(Socket *s, int rw)
 {
     iocp_event_ovlp_t* listen_ovlp = NULL;
     int seq = 0;
+    int is_hang = 0;
 
     WRITE_LOG("[sockwant] fd:%d, want:%c\n", s->fd, (char)rw);
     
     if (rw == 'h') {
         rw = 'r';
+        is_hang = 1;
     }
 
     if (s->bind_id == 0) {
@@ -283,6 +288,9 @@ sockwant(Socket *s, int rw)
 
     if (rw == s->added && rw != 0) 
     {
+        if (is_hang == 1) {
+            s->added = 'h';
+        }
         WRITE_LOG("[sockwant] event is already setted:fd:%d\n", s->fd);
         return 0;
     }
@@ -350,10 +358,18 @@ sockwant(Socket *s, int rw)
                 WRITE_LOG("[sockwant] WSARecv fail!:fd:%d, err:%d\n", s->fd, GetLastError());
                 return -1;
             }
+            if (rc == 0) {
+                WRITE_LOG("[sockwant] fd:%d, WSARecv success!, seq:%d\n", s->fd, s->read_seq);
+            }
 
             s->added = rw;
             s->reading = 1;
-            WRITE_LOG("[sockwant] WSARecv has been called:fd:%d, event:%c, seq:%d\n", s->fd, rw, seq);
+
+            if (is_hang == 1) {
+                s->added = 'h';
+            }
+
+            WRITE_LOG("[sockwant] WSARecv has been called:fd:%d, event:%c, seq:%d\n", s->fd, s->added, seq);
         }
         break;
     case 'w':
@@ -384,6 +400,9 @@ sockwant(Socket *s, int rw)
             if (rc == -1 && GetLastError() != ERROR_IO_PENDING) {
                 WRITE_LOG("[sockwant] WSASend fail!:fd:%d, err:%d\n", s->fd, GetLastError());
                 return -1;
+            }
+            if (rc == 0) {
+                WRITE_LOG("[sockwant] fd:%d, WSASend success!, seq:%d\n", s->fd, s->write_seq);
             }
 
             s->added = rw;
@@ -460,7 +479,7 @@ socknext(Socket **s, int64 timeout)
     }
 
 
-    if (err == ERROR_NETNAME_DELETED) /* the socket was closed */
+    if (err == ERROR_NETNAME_DELETED || err == WSAECONNRESET) /* the socket was closed */
     {
         WRITE_LOG("[socknext] half close:fd:%d, seq:%d\n", (*s)->fd, ovlp->seq);
         free(entry.lpOverlapped);
@@ -488,6 +507,26 @@ socknext(Socket **s, int64 timeout)
         }
 
         WRITE_LOG("[socknext] normal operation aborted:fd:%d, seq:%d\n", (*s)->fd, ovlp->seq);
+
+        if (ovlp->event == 'r') {
+            if ((*s)->added == 'h') {
+                (*s)->reading = 0;
+                (*s)->added   = 0;
+                sockwant(*s, 'h');
+            } else {
+                (*s)->reading = 0;
+                (*s)->added   = 0;
+                sockwant(*s, 'r');
+            }
+        } else {
+            /* ovlp->event == 'w' */
+
+            WRITE_LOG("[socknext] normal operation aborted, close socket :fd:%d, event:%c\n", (*s)->fd, ovlp->seq);
+            free(entry.lpOverlapped);
+            return 'h';
+        }
+
+        *s = NULL;
         free(entry.lpOverlapped);
         return 0;
     }
@@ -507,8 +546,25 @@ socknext(Socket **s, int64 timeout)
             return ret;
         }
 
+        if ((*s)->added == 'h') {
+            idle_read(*s);
+
+            (*s)->reading = 0;
+            (*s)->added   = 0;
+
+            WRITE_LOG("[socknext] hang event accepted:fd:%d, seq:%d\n", (*s)->fd, ovlp->seq);
+
+            sockwant(*s, 'h');
+            *s = NULL;
+            free(entry.lpOverlapped);
+
+            return 0;
+        }
+
+
         (*s)->reading = 0;
         (*s)->added   = 0;
+
         WRITE_LOG("[socknext] read event accepted:fd:%d, seq:%d\n", (*s)->fd, ovlp->seq);
         sockwant(*s, ovlp->event);
         break;

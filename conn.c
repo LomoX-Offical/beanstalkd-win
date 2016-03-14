@@ -147,7 +147,7 @@ void
 connsched(Conn *c)
 {
     if (c->tickpos > -1) {
-        heapremove(&c->srv->conns, c->tickpos);
+        heapremove(&c->srv->conns, c->tickpos, 1);
     }
     c->tickat = conntickat(c);
     if (c->tickat) {
@@ -241,7 +241,7 @@ connclose(Conn *c)
     TUBE_ASSIGN(c->use, NULL);
 
     if (c->tickpos > -1) {
-        heapremove(&c->srv->conns, c->tickpos);
+        heapremove(&c->srv->conns, c->tickpos, 1);
     }
 
     free(c);
